@@ -5,6 +5,7 @@ import { getClientOptions } from '../config/index.js';
 import { setQR, clearQR } from './qrManager.js';
 import { handleIncomingMessage, handleMessageAck } from './listener.js';
 import { emitConnectionStatus } from '../services/events.service.js';
+import { getSessionAccount, setSessionAccount, clearSessionData } from '../services/messages.service.js';
 import logger from '../utils/logger.js';
 
 // Per-session WhatsApp clients. Each linked device maintains its own Client
@@ -137,15 +138,33 @@ function bindEvents(sessionId, client, { onPairingCode } = {}) {
   });
 
   client.on('ready', () => {
+    const phoneNumber = client.info?.wid?.user || null;
+
+    // A session id names a slot, not an account. If a different phone has been
+    // linked into this slot, the previous account's messages and chats are not
+    // this user's data — showing them mixed together is wrong, so drop them.
+    if (phoneNumber) {
+      try {
+        const previous = getSessionAccount(sessionId);
+        if (previous && previous !== phoneNumber) {
+          logger.warn(`WhatsApp[${sessionId}]: account changed ${previous} → ${phoneNumber}. Clearing stored data.`);
+          clearSessionData(sessionId);
+        }
+        setSessionAccount(sessionId, phoneNumber);
+      } catch (error) {
+        logger.error(`WhatsApp[${sessionId}]: account-change check failed: ${error.message}`);
+      }
+    }
+
     setState(sessionId, {
       status: 'ready',
-      phoneNumber: client.info?.wid?.user || null,
+      phoneNumber,
       pushname: client.info?.pushname || null,
     });
     clearQR(sessionId);
     cancelReconnect(sessionId);
     startWatchdog(sessionId);
-    logger.info(`WhatsApp[${sessionId}]: ready.`);
+    logger.info(`WhatsApp[${sessionId}]: ready${phoneNumber ? ` (+${phoneNumber})` : ''}.`);
   });
 
   client.on('auth_failure', (message) => {
@@ -316,4 +335,13 @@ export async function logoutClient(sessionId) {
   }
   await destroyClient(sessionId);
   stateBySessionId.delete(sessionId);
+
+  // Unlinking ends this account's use of the slot, so its messages go with it.
+  // Leaving them would hand the next phone linked here someone else's history.
+  try {
+    clearSessionData(sessionId);
+    setSessionAccount(sessionId, '');
+  } catch (error) {
+    logger.error(`WhatsApp[${sessionId}]: could not clear data on logout: ${error.message}`);
+  }
 }

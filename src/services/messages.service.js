@@ -215,6 +215,40 @@ export function attachMediaToMessage(sessionId, waMessageId, { mimetype, filenam
   }
 }
 
+/**
+ * Which WhatsApp account a session slot last held, so a phone swap can be
+ * detected. Stored alongside the other settings rather than in memory, because
+ * the check has to survive a restart.
+ */
+export function getSessionAccount(sessionId) {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?')
+    .get(`session_account:${sessionId}`);
+  return row?.value || null;
+}
+
+export function setSessionAccount(sessionId, phoneNumber) {
+  getDb().prepare(`
+    INSERT INTO settings (key, value, updated_at) VALUES (@k, @v, datetime('now'))
+    ON CONFLICT (key) DO UPDATE SET value = @v, updated_at = datetime('now')
+  `).run({ k: `session_account:${sessionId}`, v: phoneNumber });
+}
+
+/**
+ * Forget everything captured for a session.
+ *
+ * A session id names a slot, not a WhatsApp account — link a different phone
+ * and the same slot now belongs to someone else. Their messages and chats must
+ * not be shown alongside the new account's, so the slot is emptied when the
+ * account behind it changes.
+ */
+export function clearSessionData(sessionId) {
+  const db = getDb();
+  const messages = db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId).changes;
+  const chats = db.prepare('DELETE FROM chats WHERE session_id = ?').run(sessionId).changes;
+  logger.info(`Cleared session "${sessionId}": ${messages} message(s), ${chats} chat(s).`);
+  return { messages, chats };
+}
+
 export function updateAck(sessionId, waMessageId, ack) {
   try {
     getDb().prepare(
