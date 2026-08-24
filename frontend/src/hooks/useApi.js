@@ -26,12 +26,20 @@ export function useApi(path, { params = {}, enabled = true, interval = 0 } = {})
   }, [fullPath, enabled]);
 
   useEffect(() => {
+    // Drop whatever was fetched last time this was enabled. Without this the
+    // stale value stays readable while disabled — which showed an expired QR
+    // code after reconnecting, since the old one was still in state.
+    if (!enabled) {
+      setData(null);
+      return;
+    }
+
     fetchData();
     if (interval > 0) {
       const id = setInterval(fetchData, interval);
       return () => clearInterval(id);
     }
-  }, [fetchData, interval]);
+  }, [fetchData, interval, enabled]);
 
   return { data, loading, error, refetch: fetchData };
 }

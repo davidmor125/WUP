@@ -156,12 +156,24 @@ function bindEvents(sessionId, client, { onPairingCode } = {}) {
   });
 
   client.on('disconnected', (reason) => {
-    setState(sessionId, { status: 'disconnected', lastError: String(reason || '') });
+    // A deliberate disconnect still fires this event as Chromium tears down,
+    // reporting things like "Protocol error (Runtime.evaluate): Target closed".
+    // That is the shutdown working, not a failure — surfacing it as lastError
+    // put a red error under a disconnect the user just asked for.
+    const deliberate = manualDisconnectBySessionId.get(sessionId);
+    setState(sessionId, {
+      status: 'disconnected',
+      lastError: deliberate ? null : String(reason || ''),
+    });
     clearQR(sessionId);
-    logger.warn(`WhatsApp[${sessionId}]: disconnected. Reason: ${reason}`);
-    if (!manualDisconnectBySessionId.get(sessionId)) {
-      scheduleReconnect(sessionId, String(reason || 'disconnected'));
+
+    if (deliberate) {
+      logger.info(`WhatsApp[${sessionId}]: disconnected (requested).`);
+      return;
     }
+
+    logger.warn(`WhatsApp[${sessionId}]: disconnected. Reason: ${reason}`);
+    scheduleReconnect(sessionId, String(reason || 'disconnected'));
   });
 
   client.on('loading_screen', (percent, message) => {
