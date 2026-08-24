@@ -218,11 +218,27 @@ export async function fetchChats(sessionId, { type } = {}) {
   const client = requireReadyClient(sessionId);
 
   const read = () => client.pupPage.evaluate(() => {
+    const contacts = window.require('WAWebCollections').Contact;
     const chats = window.require('WAWebCollections').Chat.getModelsArray();
+
     return chats.map((c) => {
       const pick = (fn) => { try { return fn(); } catch { return null; } };
       const id = pick(() => c.id?._serialized);
       if (!id) return null;
+
+      // A contact reachable through a linked device is addressed by an opaque
+      // @lid id, while the address book knows the same person by phone number.
+      // The contact record carries `phoneNumber`, which is what lets the two
+      // identities be recognized as one person instead of listed twice.
+      let phoneIdentity = null;
+      if (id.endsWith('@lid')) {
+        phoneIdentity = pick(() => {
+          const contact = contacts.get(id) || contacts.get(c.id);
+          const pn = contact?.phoneNumber;
+          return pn?._serialized || (typeof pn === 'string' ? pn : null);
+        });
+      }
+
       return {
         id,
         name: pick(() => c.formattedTitle) || pick(() => c.name) || null,
@@ -230,6 +246,7 @@ export async function fetchChats(sessionId, { type } = {}) {
         timestamp: pick(() => c.t) || null,
         archived: !!pick(() => c.archive),
         participantsCount: pick(() => c.groupMetadata?.participants?.length) || 0,
+        phoneIdentity,
       };
     }).filter(Boolean);
   });
@@ -252,11 +269,20 @@ export async function fetchChats(sessionId, { type } = {}) {
   return chats
     .map((c) => {
       const isGroup = c.id.endsWith('@g.us');
+      // Prefer the real phone number when the store knows it, so a @lid chat
+      // and the same person's address-book entry share a `phone` and can be
+      // recognized as one contact.
+      const phone = isGroup
+        ? null
+        : (c.phoneIdentity?.replace(/@.*$/, '') || c.id.replace(/@.*$/, ''));
+
       return {
         id: c.id,
-        name: c.name || (isGroup ? '(unnamed group)' : c.id.replace(/@.*$/, '')),
+        name: c.name || (isGroup ? '(unnamed group)' : phone),
         type: isGroup ? 'group' : 'private',
-        phone: isGroup ? null : c.id.replace(/@.*$/, ''),
+        phone,
+        // The addressable id stays the @lid one — that is what sending needs.
+        phoneId: c.phoneIdentity || null,
         unreadCount: c.unreadCount,
         participantsCount: c.participantsCount,
         archived: c.archived,

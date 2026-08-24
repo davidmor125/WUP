@@ -76,13 +76,32 @@ export default function ChatsPage() {
 
   const entries = useMemo(() => {
     const merged = new Map();
+
+    /**
+     * Key on the phone number for private chats.
+     *
+     * WhatsApp knows a person by two identities: their phone number
+     * (972500000000@c.us) and, once they use a linked device, an opaque LID
+     * (241952805122230@lid). The address book returns the first, conversations
+     * return the second — so keying on `id` listed the same person twice.
+     * Groups have no phone number and key on their id as before.
+     */
+    const keyOf = (item) =>
+      (item.type === 'private' && item.phone) ? `phone:${item.phone}` : item.id;
+
     const put = (item) => {
-      const prev = merged.get(item.id);
-      merged.set(item.id, {
+      const key = keyOf(item);
+      const prev = merged.get(key);
+      merged.set(key, {
         ...prev,
         ...item,
         // Never let a later source blank out a name we already have.
         name: item.name || prev?.name || null,
+        // Keep whichever id can actually be messaged. A @lid chat is the live
+        // conversation, so it wins over the address-book @c.us entry.
+        id: (item.id?.endsWith('@lid') ? item.id : prev?.id?.endsWith('@lid') ? prev.id : item.id),
+        lastMessageAt: item.lastMessageAt || prev?.lastMessageAt || null,
+        lastMessage: item.lastMessage || prev?.lastMessage || null,
       });
     };
 

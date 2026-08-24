@@ -30,4 +30,46 @@ router.get('/raw-chats', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/debug/lid-map
+ * Does the WhatsApp store expose the link between a contact's @lid identity and
+ * their phone-number identity? Used to decide how chats and contacts can be
+ * merged without showing the same person twice.
+ */
+router.get('/lid-map', async (req, res) => {
+  const client = getClient(req.query.sessionId || config.whatsapp.defaultSessionId);
+  if (!client?.pupPage) return res.status(503).json({ success: false, message: 'No active client' });
+
+  try {
+    const data = await client.pupPage.evaluate(() => {
+      const out = { modules: [], samples: [] };
+      // Which LID-related modules does this build expose?
+      for (const name of ['WAWebApiContact', 'WAWebLidMigrationUtils', 'WAWebWidToLidCache',
+        'WAWebLidPnCache', 'WAWebContactGetters', 'WAWebCollections']) {
+        try { out.modules.push({ name, keys: Object.keys(window.require(name)).slice(0, 25) }); }
+        catch (e) { out.modules.push({ name, error: String(e?.message || e).slice(0, 80) }); }
+      }
+      // Sample a few LID contacts and see what identity fields they carry.
+      try {
+        const contacts = window.require('WAWebCollections').Contact.getModelsArray();
+        for (const c of contacts.filter((x) => x.id?._serialized?.endsWith('@lid')).slice(0, 5)) {
+          const pick = (fn) => { try { return fn(); } catch { return null; } };
+          out.samples.push({
+            id: pick(() => c.id?._serialized),
+            name: pick(() => c.name) || pick(() => c.pushname),
+            phoneNumber: pick(() => c.phoneNumber?._serialized) || pick(() => c.phoneNumber),
+            pnForLid: pick(() => c.pnForLid?._serialized) || pick(() => c.pnForLid),
+            lidForPn: pick(() => c.lidForPn?._serialized) || pick(() => c.lidForPn),
+            fields: pick(() => Object.keys(c.serialize?.() || {}).slice(0, 30)),
+          });
+        }
+      } catch (e) { out.samplesError = String(e?.message || e); }
+      return out;
+    });
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 export default router;
