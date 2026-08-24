@@ -1,0 +1,12 @@
+{
+  "watch": ["src"],
+  "ext": "js,mjs,json,sql",
+  "ignore": [
+    "data/*",
+    ".wwebjs_auth/*",
+    ".wwebjs_cache/*",
+    "frontend/*",
+    "*.log"
+  ],
+  "delay": 500
+}

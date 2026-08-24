@@ -22,6 +22,9 @@ cd frontend && npm install && npm run dev   # UI on :5173
 Open http://localhost:5173, click **Connect**, and scan the QR with
 WhatsApp → Settings → Linked devices.
 
+For setup details, project layout, and the non-obvious constraints worth
+knowing before changing things, see [DEVELOPMENT.md](DEVELOPMENT.md).
+
 In production, `npm run build` compiles the UI and `RUNTIME=server npm start`
 serves it from the same process on `:3000`.
 
