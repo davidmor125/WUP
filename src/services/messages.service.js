@@ -1,6 +1,13 @@
 import { getDb } from '../db/index.js';
 import logger from '../utils/logger.js';
 
+/** Map a stored relative path ("data/media/x.jpg") to its served URL ("/media/x.jpg"). */
+function toMediaUrl(storedPath) {
+  if (!storedPath) return null;
+  const clean = String(storedPath).replace(/\\/g, '/').replace(/^\/+/, '');
+  return `/media/${clean.replace(/^data\/media\//, '')}`;
+}
+
 function toApp(row) {
   if (!row) return null;
   return {
@@ -19,7 +26,15 @@ function toApp(row) {
     type: row.type,
     hasMedia: !!row.has_media,
     media: row.has_media
-      ? { mimetype: row.media_mimetype, filename: row.media_filename, path: row.media_path }
+      ? {
+        mimetype: row.media_mimetype,
+        filename: row.media_filename,
+        path: row.media_path,
+        // The path is stored relative to the project, but the folder is mounted
+        // at /media — hand callers the URL that actually resolves so they don't
+        // have to know that mapping.
+        url: toMediaUrl(row.media_path),
+      }
       : null,
     quotedId: row.quoted_id,
     ack: row.ack,

@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 /**
  * Render one message's content: media when present, then text.
  *
@@ -28,9 +30,25 @@ const TYPE_LABEL = {
 // better large, the way every chat client shows it.
 const EMOJI_ONLY = /^(\p{Extended_Pictographic}|\p{Emoji_Component}|️|‍|\s){1,12}$/u;
 
+/**
+ * Turn a stored media path into a URL the server actually serves.
+ *
+ * Paths are stored relative to the project ("data/media/x.jpg") but the server
+ * mounts that folder at "/media", so the stored prefix has to be swapped rather
+ * than simply prepended with a slash.
+ */
+function mediaUrl(storedPath) {
+  if (!storedPath) return null;
+  const clean = String(storedPath).replace(/\\/g, '/').replace(/^\/+/, '');
+  return `/media/${clean.replace(/^data\/media\//, '')}`;
+}
+
 export default function MessageBody({ message }) {
+  const [broken, setBroken] = useState(false);
   const { body, type, hasMedia, media } = message;
-  const src = media?.path ? `/${media.path}` : null;
+  // The API supplies a ready URL; deriving from `path` covers rows delivered by
+  // an older build (and messages arriving over SSE from one).
+  const src = media?.url || mediaUrl(media?.path);
   const mime = media?.mimetype || '';
 
   const emojiOnly = body && EMOJI_ONLY.test(body) && /\p{Extended_Pictographic}/u.test(body);
@@ -40,11 +58,21 @@ export default function MessageBody({ message }) {
       {src && (
         <div className="mb-1">
           {mime.startsWith('image/') || type === 'sticker' ? (
-            <img
-              src={src}
-              alt={type === 'sticker' ? 'Sticker' : 'Image'}
-              className={type === 'sticker' ? 'max-h-32' : 'rounded max-w-full max-h-64'}
-            />
+            broken ? (
+              // A broken-image icon says nothing about what went wrong; name the
+              // file and offer the link so the failure is diagnosable.
+              <a href={src} target="_blank" rel="noreferrer"
+                className="text-xs text-muted italic underline break-all">
+                🖼️ {media.filename || 'Image'} — could not be displayed
+              </a>
+            ) : (
+              <img
+                src={src}
+                alt={type === 'sticker' ? 'Sticker' : 'Image'}
+                onError={() => setBroken(true)}
+                className={type === 'sticker' ? 'max-h-32' : 'rounded max-w-full max-h-64'}
+              />
+            )
           ) : mime.startsWith('video/') ? (
             <video controls src={src} className="rounded max-w-full max-h-64" />
           ) : mime.startsWith('audio/') ? (
