@@ -86,12 +86,29 @@ export default function ChatsPage() {
      * return the second — so keying on `id` listed the same person twice.
      * Groups have no phone number and key on their id as before.
      */
-    const keyOf = (item) =>
-      (item.type === 'private' && item.phone) ? `phone:${item.phone}` : item.id;
+    // Where each already-merged entry lives, indexed by every identity it is
+    // known by. One person can arrive as an address-book @c.us entry, as a
+    // @lid conversation, and as a stored chat whose `phone` column holds the
+    // LID digits rather than the real number — all three must land on the same
+    // row, so each identity gets its own alias pointing at one key.
+    const aliases = new Map();
+
+    const identitiesOf = (item) => {
+      const ids = [item.id];
+      if (item.type === 'private') {
+        if (item.phone) ids.push(`phone:${item.phone}`);
+        if (item.phoneId) ids.push(item.phoneId, `phone:${item.phoneId.replace(/@.*$/, '')}`);
+      }
+      return ids.filter(Boolean);
+    };
 
     const put = (item) => {
-      const key = keyOf(item);
+      const ids = identitiesOf(item);
+      // Reuse the row this person is already filed under, whichever identity
+      // introduced them; otherwise start a new one.
+      const key = ids.map((i) => aliases.get(i)).find(Boolean) || ids[0];
       const prev = merged.get(key);
+
       merged.set(key, {
         ...prev,
         ...item,
@@ -100,9 +117,13 @@ export default function ChatsPage() {
         // Keep whichever id can actually be messaged. A @lid chat is the live
         // conversation, so it wins over the address-book @c.us entry.
         id: (item.id?.endsWith('@lid') ? item.id : prev?.id?.endsWith('@lid') ? prev.id : item.id),
+        // A real phone number beats LID digits masquerading as one.
+        phone: item.phoneId?.replace(/@.*$/, '') || prev?.phone || item.phone || null,
         lastMessageAt: item.lastMessageAt || prev?.lastMessageAt || null,
         lastMessage: item.lastMessage || prev?.lastMessage || null,
       });
+
+      for (const i of ids) aliases.set(i, key);
     };
 
     for (const c of contactsData?.data || []) {
@@ -111,6 +132,8 @@ export default function ChatsPage() {
     for (const c of chatsData?.data || []) {
       put({
         id: c.id, type: c.type, phone: c.phone, name: c.name,
+        // Links this @lid chat to the same person's address-book entry.
+        phoneId: c.phoneId,
         lastMessageAt: c.lastMessageAt, deviceUnread: c.unreadCount,
         participantsCount: c.participantsCount,
       });
@@ -335,7 +358,8 @@ export default function ChatsPage() {
               </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+            {/* A tinted backdrop so both bubble colours stand out against it. */}
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-canvas">
               {messages.length === 0 && (
                 <p className="text-xs text-muted text-center py-8">
                   {active.isNew
@@ -347,7 +371,15 @@ export default function ChatsPage() {
                 const outbound = m.direction === 'outbound';
                 return (
                   <div key={m.waMessageId} className={`flex ${outbound ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[70%] rounded-lg px-3 py-2 ${outbound ? 'bg-accent/15' : 'bg-canvas'}`}>
+                    {/* Outgoing green, incoming grey — the convention every
+                        chat client uses, so direction reads at a glance. The
+                        incoming bubble needs its own border because bg-canvas
+                        is the page background and would otherwise vanish. */}
+                    <div className={`max-w-[70%] rounded-lg px-3 py-2 ${
+                      outbound
+                        ? 'bg-[#d9fdd3] border border-[#c5f0bd]'
+                        : 'bg-white border border-border'
+                    }`}>
                       {active.type === 'group' && !outbound && (
                         <div className="text-[11px] font-medium text-accent-dark mb-0.5">
                           {m.authorName || m.authorId}
